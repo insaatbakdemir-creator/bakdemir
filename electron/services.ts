@@ -17,7 +17,8 @@ const transactionSchema = z.object({
   amount: z.number().positive(),
   material_deduction_amount: z.number().nonnegative().default(0),
   equipment_deduction_amount: z.number().nonnegative().default(0),
-  description: z.string().min(3)
+  description: z.string().min(3),
+  status: z.string().optional()
 });
 
 export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain; db: Database.Database; dialog: Dialog; app: App }) {
@@ -43,6 +44,53 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
   ipcMain.handle('project:list', () => db.prepare('SELECT * FROM projects ORDER BY id DESC').all());
   ipcMain.handle('subcontractor:list', () => db.prepare('SELECT * FROM subcontractors ORDER BY name').all());
   ipcMain.handle('company:list', () => db.prepare('SELECT * FROM companies ORDER BY name').all());
+
+  ipcMain.handle('subcontractor:managementList', () => db.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.expertise,
+      s.phone,
+      s.status,
+      s.notes,
+      COALESCE(ps.project_count,0) AS project_count,
+      COALESCE(SUM(CASE WHEN t.transaction_type='HAKEDIS' THEN t.amount ELSE 0 END),0) AS total_progress,
+      COALESCE(SUM(CASE WHEN t.transaction_type='ODEME' THEN t.amount ELSE 0 END),0) AS total_payment,
+      COALESCE(SUM(CASE WHEN t.transaction_type='AVANS' THEN t.amount ELSE 0 END),0) AS total_advance,
+      COALESCE(SUM(CASE WHEN t.transaction_type='KESINTI' THEN t.amount ELSE 0 END),0) AS total_deduction,
+      0 AS extra_balance,
+      (
+        COALESCE(SUM(CASE WHEN t.transaction_type='HAKEDIS' THEN t.amount ELSE 0 END),0)
+        - COALESCE(SUM(CASE WHEN t.transaction_type='ODEME' THEN t.amount ELSE 0 END),0)
+        - COALESCE(SUM(CASE WHEN t.transaction_type='AVANS' THEN t.amount ELSE 0 END),0)
+        - COALESCE(SUM(CASE WHEN t.transaction_type='KESINTI' THEN t.amount ELSE 0 END),0)
+      ) AS net_balance
+    FROM subcontractors s
+    LEFT JOIN transactions t ON t.related_party_type='TASERON' AND t.related_party_id=s.id
+    LEFT JOIN (
+      SELECT subcontractor_id, COUNT(*) AS project_count FROM project_subcontractors GROUP BY subcontractor_id
+    ) ps ON ps.subcontractor_id=s.id
+    GROUP BY s.id
+    ORDER BY s.name
+  `).all());
+
+  ipcMain.handle('transaction:listByType', (_event, type: string, relatedPartyId: number) => db.prepare(`
+    SELECT id, transaction_date, amount, description, status
+    FROM transactions
+    WHERE transaction_type=? AND related_party_id=?
+    ORDER BY transaction_date DESC, id DESC
+  `).all(type, relatedPartyId));
+
+  ipcMain.handle('project:financialSummary', (_event, projectId: number) => db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN flow_direction='GELIR' THEN amount ELSE 0 END),0) AS total_income,
+      COALESCE(SUM(CASE WHEN flow_direction='GIDER' THEN amount ELSE 0 END),0) AS total_expense,
+      COALESCE(SUM(CASE WHEN transaction_type='HAKEDIS' THEN amount ELSE 0 END),0) AS total_hakedis,
+      COALESCE(SUM(CASE WHEN transaction_type='ODEME' THEN amount ELSE 0 END),0) AS total_odeme
+    FROM transactions
+    WHERE project_id=?
+  `).get(projectId));
+
   ipcMain.handle('personnel:list', () => db.prepare('SELECT * FROM personnel ORDER BY full_name').all());
 
   ipcMain.handle('transaction:recent', () => db.prepare(`
@@ -62,8 +110,8 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
       INSERT INTO transactions (
         transaction_type, flow_direction, related_party_type, related_party_id, project_id,
         transaction_date, due_date, payment_channel, amount, material_deduction_amount,
-        equipment_deduction_amount, description
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        equipment_deduction_amount, description, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       p.transaction_type,
       p.flow_direction,
@@ -76,7 +124,8 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
       p.amount,
       p.material_deduction_amount,
       p.equipment_deduction_amount,
-      p.description
+      p.description,
+      p.status ?? 'ACIK'
     );
 
     return { ok: true };

@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { SummaryCards } from './components/SummaryCards';
-import { TransactionForm } from './modules/TransactionForm';
-import { ReportsPanel } from './modules/ReportsPanel';
+import { DashboardPage } from './modules/DashboardPage';
+import { CompaniesPage } from './modules/CompaniesPage';
+import { SubcontractorsPage } from './modules/SubcontractorsPage';
+import { ProjectsPage } from './modules/ProjectsPage';
+import { HakedisYevmiyePage } from './modules/HakedisYevmiyePage';
+import { AvansOdemeKesintiPage } from './modules/AvansOdemeKesintiPage';
+import { ModuleEntriesPage } from './modules/ModuleEntriesPage';
 
 export function App() {
   const [selected, setSelected] = useState('Dashboard');
@@ -10,25 +14,22 @@ export function App() {
   const [dashboard, setDashboard] = useState<Record<string, number>>({});
   const [projects, setProjects] = useState<any[]>([]);
   const [subcontractors, setSubcontractors] = useState<any[]>([]);
+  const [subcontractorMgmt, setSubcontractorMgmt] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
-  const [personnel, setPersonnel] = useState<any[]>([]);
+  const [companyBalances, setCompanyBalances] = useState<any[]>([]);
   const [recent, setRecent] = useState<any[]>([]);
 
   const refresh = async () => {
-    const [d, p, s, c, pe, r] = await Promise.all([
+    const [d, p, s, sm, c, cb, r] = await Promise.all([
       window.dobiApi.dashboard(),
       window.dobiApi.listProjects(),
       window.dobiApi.listSubcontractors(),
+      window.dobiApi.listSubcontractorManagement(),
       window.dobiApi.listCompanies(),
-      window.dobiApi.listPersonnel(),
+      window.dobiApi.listCompanyBalances(),
       window.dobiApi.recentTransactions()
     ]);
-    setDashboard(d);
-    setProjects(p);
-    setSubcontractors(s);
-    setCompanies(c);
-    setPersonnel(pe);
-    setRecent(r);
+    setDashboard(d); setProjects(p); setSubcontractors(s); setSubcontractorMgmt(sm); setCompanies(c); setCompanyBalances(cb); setRecent(r);
   };
 
   useEffect(() => {
@@ -36,49 +37,30 @@ export function App() {
     refresh();
   }, []);
 
+  const renderContent = () => {
+    if (selected === 'Dashboard') return <DashboardPage dashboard={dashboard} recent={recent} />;
+    if (selected === 'Firma / Cari Yönetimi') return <CompaniesPage rows={companyBalances} movements={recent} onRefresh={refresh} />;
+    if (selected === 'Taşeron Yönetimi') return <SubcontractorsPage rows={subcontractorMgmt} onRefresh={refresh} />;
+    if (selected === 'Hakediş + Yevmiye') return <HakedisYevmiyePage companies={companies} subcontractors={subcontractors} projects={projects} onSaved={refresh} />;
+    if (selected === 'Avans / Ödeme / Kesinti') return <AvansOdemeKesintiPage companies={companies} subcontractors={subcontractors} projects={projects} onSaved={refresh} />;
+    if (selected === 'Projeler') return <ProjectsPage projects={projects} companies={companies} subcontractors={subcontractors} onRefresh={refresh} />;
+    if (selected === 'Personel') return <ModuleEntriesPage moduleKey="personel" title="Personel Hareketleri" companies={companies} subcontractors={subcontractors} projects={projects} />;
+    if (selected === 'Malzeme') return <ModuleEntriesPage moduleKey="malzeme" title="Malzeme Hareketleri" companies={companies} subcontractors={subcontractors} projects={projects} />;
+    if (selected === 'Ekipman / Hizmet') return <ModuleEntriesPage moduleKey="ekipman_hizmet" title="Ekipman / Hizmet" companies={companies} subcontractors={subcontractors} projects={projects} />;
+    if (selected === 'Senet / Vade') return <ModuleEntriesPage moduleKey="senet_vade" title="Senet / Vade" companies={companies} subcontractors={subcontractors} projects={projects} />;
+    if (selected === 'Raporlama') return <ModuleEntriesPage moduleKey="raporlama" title="Raporlama" companies={companies} subcontractors={subcontractors} projects={projects} />;
+    return <section className="panel">Modül bulunamadı.</section>;
+  };
+
   return (
     <main className="layout">
       <Sidebar selected={selected} onSelect={setSelected} />
       <section className="content">
         <header className="topbar">
           <h1>{selected}</h1>
-          <div>
-            <span>{meta?.appName} v{meta?.version}</span>
-            <small>Geliştirici: {meta?.developer} | Tamamen Offline</small>
-          </div>
+          <div><span>{meta?.appName} v{meta?.version}</span><small>Geliştirici: {meta?.developer} | Tamamen Offline</small></div>
         </header>
-
-        <SummaryCards data={dashboard} />
-
-        <div className="split">
-          <TransactionForm
-            projects={projects}
-            subcontractors={subcontractors}
-            companies={companies}
-            personnel={personnel}
-            onSaved={refresh}
-          />
-
-          <section className="panel">
-            <h3>Son Hareketler</h3>
-            <table>
-              <thead><tr><th>Tarih</th><th>Tür</th><th>Tutar</th><th>Açıklama</th><th>Durum</th></tr></thead>
-              <tbody>
-                {recent.map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.transaction_date}</td>
-                    <td>{r.transaction_type}</td>
-                    <td>{r.amount}</td>
-                    <td>{r.description}</td>
-                    <td className={r.due_date && r.due_date < new Date().toISOString().slice(0, 10) ? 'danger' : ''}>{r.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-        </div>
-
-        <ReportsPanel subcontractors={subcontractors} />
+        {renderContent()}
       </section>
     </main>
   );
