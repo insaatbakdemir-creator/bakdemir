@@ -32,10 +32,10 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
         COALESCE(SUM(CASE WHEN due_date < date('now') AND status='ACIK' AND flow_direction='GELIR' THEN amount ELSE 0 END),0) AS gecikmis_tahsilat
       FROM transactions
       WHERE strftime('%Y-%m', transaction_date) = strftime('%Y-%m', 'now')
-    `).get();
+    `).get() as Record<string, number>;
 
-    const subcontractorTotals = db.prepare('SELECT COALESCE(SUM(net_receivable),0) AS total_net FROM subcontractor_balance_view').get();
-    const openNotes = db.prepare("SELECT COALESCE(SUM(amount),0) AS open_notes FROM promissory_notes WHERE status='ACIK'").get();
+    const subcontractorTotals = db.prepare('SELECT COALESCE(SUM(net_receivable),0) AS total_net FROM subcontractor_balance_view').get() as Record<string, number>;
+    const openNotes = db.prepare("SELECT COALESCE(SUM(amount),0) AS open_notes FROM promissory_notes WHERE status='ACIK'").get() as Record<string, number>;
 
     return { ...summary, ...subcontractorTotals, ...openNotes };
   });
@@ -157,7 +157,8 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
   });
 
   ipcMain.handle('print:html', async (_event, { html, title }: { html: string; title: string }) => {
-    const win = new (require('electron').BrowserWindow)({ show: false, webPreferences: { offscreen: true } });
+    const { BrowserWindow } = await import('electron');
+    const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
     const { response } = await dialog.showMessageBox({
