@@ -17,9 +17,54 @@ const transactionSchema = z.object({
   amount: z.number().positive(),
   material_deduction_amount: z.number().nonnegative().default(0),
   equipment_deduction_amount: z.number().nonnegative().default(0),
-  description: z.string().min(3),
-  status: z.string().optional()
+  description: z.string().min(3)
 });
+
+const companySchema = z.object({
+  code: z.string().min(2),
+  name: z.string().min(2),
+  company_type: z.enum(['MUSTERI', 'MUTEAHHIT', 'TEDARIKCI', 'TASERON', 'KARMA']),
+  contact_name: z.string().optional(),
+  phone: z.string().optional(),
+  opening_balance: z.number().default(0),
+  status: z.enum(['AKTIF', 'PASIF']).default('AKTIF')
+});
+
+const subcontractorSchema = z.object({
+  name: z.string().min(2),
+  team_name: z.string().optional(),
+  contact_name: z.string().optional(),
+  phone: z.string().optional(),
+  expertise: z.string().optional(),
+  status: z.enum(['AKTIF', 'PASIF']).default('AKTIF'),
+  notes: z.string().optional()
+});
+
+const projectSchema = z.object({
+  code: z.string().min(2),
+  name: z.string().min(2),
+  linked_company_id: z.number().int().positive().optional(),
+  location: z.string().optional(),
+  status: z.enum(['DEVAM', 'TAMAMLANDI', 'BEKLEME']).default('DEVAM'),
+  subcontractor_ids: z.array(z.number().int().positive()).default([])
+});
+
+const moduleEntrySchema = z.object({
+  module_key: z.string().min(2),
+  title: z.string().min(2),
+  amount: z.number().default(0),
+  transaction_date: z.string(),
+  related_company_id: z.number().int().positive().optional(),
+  related_subcontractor_id: z.number().int().positive().optional(),
+  related_project_id: z.number().int().positive().optional(),
+  notes: z.string().optional()
+});
+
+function defaultStatusByType(type: string): string {
+  if (type === 'HAKEDIS' || type === 'YEVMIYE') return 'ONAYLANDI';
+  if (type === 'AVANS' || type === 'ODEME' || type === 'KESINTI' || type === 'TAHSILAT') return 'TAMAMLANDI';
+  return 'AKTIF';
+}
 
 export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain; db: Database.Database; dialog: Dialog; app: App }) {
   ipcMain.handle('dashboard:getSummary', () => {
@@ -28,28 +73,57 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
         COALESCE(SUM(CASE WHEN flow_direction='GELIR' THEN amount ELSE 0 END),0) AS toplam_tahsilat,
         COALESCE(SUM(CASE WHEN flow_direction='GIDER' THEN amount ELSE 0 END),0) AS toplam_odeme,
         COALESCE(SUM(CASE WHEN transaction_type='ODEME' AND related_party_type='TASERON' THEN amount ELSE 0 END),0) AS taseron_odeme_ay,
-        COALESCE(SUM(CASE WHEN transaction_type='HAKEDIS' THEN amount ELSE 0 END),0) AS hakedis_ay,
-        COALESCE(SUM(CASE WHEN due_date < date('now') AND status='ACIK' AND flow_direction='GIDER' THEN amount ELSE 0 END),0) AS gecikmis_odeme,
-        COALESCE(SUM(CASE WHEN due_date < date('now') AND status='ACIK' AND flow_direction='GELIR' THEN amount ELSE 0 END),0) AS gecikmis_tahsilat
+        COALESCE(SUM(CASE WHEN transaction_type='HAKEDIS' THEN amount ELSE 0 END),0) AS hakedis_ay
       FROM transactions
       WHERE strftime('%Y-%m', transaction_date) = strftime('%Y-%m', 'now')
     `).get() as Record<string, number>;
-
     const subcontractorTotals = db.prepare('SELECT COALESCE(SUM(net_receivable),0) AS total_net FROM subcontractor_balance_view').get() as Record<string, number>;
     const openNotes = db.prepare("SELECT COALESCE(SUM(amount),0) AS open_notes FROM promissory_notes WHERE status='ACIK'").get() as Record<string, number>;
-
     return { ...summary, ...subcontractorTotals, ...openNotes };
   });
 
-  ipcMain.handle('project:list', () => db.prepare('SELECT * FROM projects ORDER BY id DESC').all());
-  ipcMain.handle('subcontractor:list', () => db.prepare('SELECT * FROM subcontractors ORDER BY name').all());
-  ipcMain.handle('company:list', () => db.prepare('SELECT * FROM companies ORDER BY name').all());
+  ipcMain.handle('company:list', () => db.prepare('SELECT * FROM companies ORDER BY id DESC').all());
+  ipcMain.handle('company:create', (_event, payload) => {
+    const parsed = companySchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, errors: parsed.error.issues };
+    const p = parsed.data;
+    db.prepare(`
+      INSERT INTO companies (code, name, company_type, contact_name, phone, opening_balance, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(p.code, p.name, p.company_type, p.contact_name ?? null, p.phone ?? null, p.opening_balance, p.status);
+    return { ok: true };
+  });
+
+  ipcMain.handle('company:balances', () => db.prepare(`
+    SELECT
+      c.*,
+      COALESCE(SUM(CASE WHEN t.flow_direction='GELIR' THEN t.amount ELSE 0 END), 0) AS total_income,
+      COALESCE(SUM(CASE WHEN t.flow_direction='GIDER' THEN t.amount ELSE 0 END), 0) AS total_expense,
+      c.opening_balance + COALESCE(SUM(CASE WHEN t.flow_direction='GELIR' THEN t.amount ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN t.flow_direction='GIDER' THEN t.amount ELSE 0 END), 0) AS current_balance,
+      COALESCE(SUM(CASE WHEN t.due_date < date('now') AND t.status NOT IN ('ODENDI','TAHSIL_EDILDI','TAMAMLANDI') THEN t.amount ELSE 0 END),0) AS overdue_amount
+    FROM companies c
+    LEFT JOIN transactions t ON t.related_party_type IN ('FIRMA', 'TEDARIKCI') AND t.related_party_id = c.id
+    GROUP BY c.id
+    ORDER BY c.name
+  `).all());
+
+  ipcMain.handle('subcontractor:list', () => db.prepare('SELECT * FROM subcontractors ORDER BY id DESC').all());
+  ipcMain.handle('subcontractor:create', (_event, payload) => {
+    const parsed = subcontractorSchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, errors: parsed.error.issues };
+    const p = parsed.data;
+    db.prepare(`
+      INSERT INTO subcontractors (name, team_name, contact_name, phone, expertise, status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(p.name, p.team_name ?? null, p.contact_name ?? null, p.phone ?? null, p.expertise ?? null, p.status, p.notes ?? null);
+    return { ok: true };
+  });
 
   ipcMain.handle('subcontractor:managementList', () => db.prepare(`
     SELECT
       s.id,
       s.name,
-      s.expertise,
+      COALESCE(s.team_name, s.expertise, '-') AS expertise,
       s.phone,
       s.status,
       s.notes,
@@ -74,12 +148,29 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
     ORDER BY s.name
   `).all());
 
-  ipcMain.handle('transaction:listByType', (_event, type: string, relatedPartyId: number) => db.prepare(`
-    SELECT id, transaction_date, amount, description, status
-    FROM transactions
-    WHERE transaction_type=? AND related_party_id=?
-    ORDER BY transaction_date DESC, id DESC
-  `).all(type, relatedPartyId));
+  ipcMain.handle('project:list', () => db.prepare(`
+    SELECT p.*, c.name AS company_name
+    FROM projects p
+    LEFT JOIN companies c ON c.id = p.linked_company_id
+    ORDER BY p.id DESC
+  `).all());
+
+  ipcMain.handle('project:create', (_event, payload) => {
+    const parsed = projectSchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, errors: parsed.error.issues };
+    const p = parsed.data;
+    const tx = db.transaction(() => {
+      const inserted = db.prepare(`
+        INSERT INTO projects (code, name, linked_company_id, location, status)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(p.code, p.name, p.linked_company_id ?? null, p.location ?? null, p.status);
+      for (const sid of p.subcontractor_ids) {
+        db.prepare('INSERT OR IGNORE INTO project_subcontractors (project_id, subcontractor_id) VALUES (?, ?)').run(inserted.lastInsertRowid, sid);
+      }
+    });
+    tx();
+    return { ok: true };
+  });
 
   ipcMain.handle('project:financialSummary', (_event, projectId: number) => db.prepare(`
     SELECT
@@ -91,20 +182,23 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
     WHERE project_id=?
   `).get(projectId));
 
-  ipcMain.handle('personnel:list', () => db.prepare('SELECT * FROM personnel ORDER BY full_name').all());
+  ipcMain.handle('personnel:list', () => db.prepare('SELECT id, full_name FROM personnel ORDER BY full_name').all());
 
   ipcMain.handle('transaction:recent', () => db.prepare(`
     SELECT id, transaction_type, flow_direction, related_party_type, related_party_id, project_id, transaction_date, due_date, amount, description, status
-    FROM transactions
-    ORDER BY transaction_date DESC, id DESC
-    LIMIT 20
+    FROM transactions ORDER BY id DESC LIMIT 40
   `).all());
+
+  ipcMain.handle('transaction:listByType', (_event, type: string, relatedPartyId: number) => db.prepare(`
+    SELECT id, transaction_date, amount, description, status
+    FROM transactions
+    WHERE transaction_type=? AND related_party_id=?
+    ORDER BY transaction_date DESC, id DESC
+  `).all(type, relatedPartyId));
 
   ipcMain.handle('transaction:create', (_event, payload) => {
     const parsed = transactionSchema.safeParse(payload);
-    if (!parsed.success) {
-      return { ok: false, errors: parsed.error.issues };
-    }
+    if (!parsed.success) return { ok: false, errors: parsed.error.issues };
     const p = parsed.data;
     db.prepare(`
       INSERT INTO transactions (
@@ -125,9 +219,32 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
       p.material_deduction_amount,
       p.equipment_deduction_amount,
       p.description,
-      p.status ?? 'ACIK'
+      defaultStatusByType(p.transaction_type)
     );
+    return { ok: true };
+  });
 
+  ipcMain.handle('module-entry:list', (_event, moduleKey: string) => db.prepare(`
+    SELECT me.*, p.name AS project_name
+    FROM module_entries me
+    LEFT JOIN projects p ON p.id = me.related_project_id
+    WHERE me.module_key=?
+    ORDER BY me.transaction_date DESC, me.id DESC
+  `).all(moduleKey));
+
+  ipcMain.handle('module-entry:create', (_event, payload) => {
+    const parsed = moduleEntrySchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, errors: parsed.error.issues };
+    const m = parsed.data;
+    db.prepare(`
+      INSERT INTO module_entries (module_key, title, amount, transaction_date, related_company_id, related_subcontractor_id, related_project_id, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(m.module_key, m.title, m.amount, m.transaction_date, m.related_company_id ?? null, m.related_subcontractor_id ?? null, m.related_project_id ?? null, m.notes ?? null);
+    return { ok: true };
+  });
+
+  ipcMain.handle('module-entry:delete', (_event, id: number) => {
+    db.prepare('DELETE FROM module_entries WHERE id=?').run(id);
     return { ok: true };
   });
 
@@ -155,53 +272,17 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Taşeron Ekstresi');
-
     sheet.mergeCells('A1:H1');
     sheet.getCell('A1').value = `DOBİ | Taşeron Hesap Ekstresi | ${subcontractor.name}`;
     sheet.getCell('A1').font = { bold: true, size: 15 };
-    sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left' };
-
     sheet.addRow([]);
-    const header = sheet.addRow(['Tarih', 'İşlem Türü', 'Tutar', 'Malzeme Kesintisi', 'Ekipman Kesintisi', 'Açıklama', 'Vade', 'Durum']);
-    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    header.eachCell((cell) => {
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
-      cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'thin' } };
-    });
-
-    report.forEach((row) => {
-      sheet.addRow([
-        row.transaction_date,
-        row.transaction_type,
-        row.amount,
-        row.material_deduction_amount,
-        row.equipment_deduction_amount,
-        row.description,
-        row.due_date,
-        row.status
-      ]);
-    });
-
-    sheet.columns = [
-      { width: 14 },
-      { width: 16 },
-      { width: 14 },
-      { width: 16 },
-      { width: 16 },
-      { width: 38 },
-      { width: 14 },
-      { width: 12 }
-    ];
-
-    [3, 4, 5].forEach((col) => {
-      sheet.getColumn(col).numFmt = '#,##0.00 [$₺-tr-TR]';
-    });
+    sheet.addRow(['Tarih', 'İşlem Türü', 'Tutar', 'Malzeme Kesintisi', 'Ekipman Kesintisi', 'Açıklama', 'Vade', 'Durum']);
+    report.forEach((row) => sheet.addRow([row.transaction_date, row.transaction_type, row.amount, row.material_deduction_amount, row.equipment_deduction_amount, row.description, row.due_date, row.status]));
 
     const exportDir = path.join(app.getPath('documents'), 'DOBI-Raporlar');
     fs.mkdirSync(exportDir, { recursive: true });
     const filePath = path.join(exportDir, `dobi_taseron_ekstre_${subcontractorId}_${Date.now()}.xlsx`);
     await workbook.xlsx.writeFile(filePath);
-
     return { ok: true, filePath };
   });
 
@@ -209,19 +290,12 @@ export function createHandlers({ ipcMain, db, dialog, app }: { ipcMain: IpcMain;
     const { BrowserWindow } = await import('electron');
     const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-
-    const { response } = await dialog.showMessageBox({
-      type: 'question',
-      message: `${title} raporu yazdırılsın mı?`,
-      buttons: ['Evet', 'Vazgeç']
-    });
-
+    const { response } = await dialog.showMessageBox({ type: 'question', message: `${title} raporu yazdırılsın mı?`, buttons: ['Evet', 'Vazgeç'] });
     if (response === 0) {
       await (win.webContents as WebContents).print({ printBackground: true, silent: false });
       win.destroy();
       return { ok: true };
     }
-
     win.destroy();
     return { ok: false, message: 'Yazdırma iptal edildi.' };
   });

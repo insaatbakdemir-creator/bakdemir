@@ -20,6 +20,7 @@ export function SubcontractorsPage({ rows, onRefresh }: { rows: Row[]; onRefresh
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(rows[0]?.id ?? null);
   const [tab, setTab] = useState('GENEL');
+  const [msg, setMsg] = useState('');
   const [form, setForm] = useState({ name: '', team_name: '', contact_name: '', phone: '', expertise: '', status: 'AKTIF', notes: '' });
 
   const filtered = useMemo(() => rows.filter((r) => r.name.toLowerCase().includes(search.toLowerCase())), [rows, search]);
@@ -27,9 +28,14 @@ export function SubcontractorsPage({ rows, onRefresh }: { rows: Row[]; onRefresh
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await window.dobiApi.createSubcontractor(form);
+    const res = await window.dobiApi.createSubcontractor(form);
+    if (!res.ok) {
+      setMsg('Taşeron kaydedilemedi.');
+      return;
+    }
     setForm({ name: '', team_name: '', contact_name: '', phone: '', expertise: '', status: 'AKTIF', notes: '' });
     await onRefresh();
+    setMsg('Taşeron eklendi.');
   };
 
   const tabs = ['GENEL', 'HAKEDISLER', 'ODEMELER', 'AVANSLAR', 'KESINTILER', 'SENETLER', 'NOTLAR'];
@@ -38,39 +44,21 @@ export function SubcontractorsPage({ rows, onRefresh }: { rows: Row[]; onRefresh
     <div className="module-stack">
       <section className="panel">
         <h3>Taşeron Yönetimi</h3>
-        <div className="row">
-          <input placeholder="Taşeron ara" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
+        <div className="row"><input placeholder="Taşeron ara" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
         <form className="inline-form" onSubmit={submit}>
           <label>Taşeron Adı</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="Örn: Demir Ustaları" />
           <label>Ekip/Branş</label><input value={form.expertise} onChange={(e) => setForm({ ...form, expertise: e.target.value })} placeholder="Kalıp, Demir..." />
           <label>Telefon</label><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="05xx..." />
           <button type="submit">Yeni Taşeron Ekle</button>
         </form>
+        {msg ? <small>{msg}</small> : null}
       </section>
 
       <section className="panel">
         <table>
-          <thead>
-            <tr>
-              <th>Taşeron Adı</th><th>Ekip/Branş</th><th>Telefon</th><th>Proje Sayısı</th><th>Toplam Hakediş</th><th>Toplam Ödeme</th><th>Toplam Avans</th><th>Toplam Kesinti</th><th>Kalan Borç/Alacak</th><th>Durum</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Taşeron Adı</th><th>Ekip/Branş</th><th>Telefon</th><th>Proje Sayısı</th><th>Toplam Hakediş</th><th>Toplam Ödeme</th><th>Toplam Avans</th><th>Toplam Kesinti</th><th>Kalan Borç/Alacak</th><th>Durum</th></tr></thead>
           <tbody>
-            {filtered.map((r) => (
-              <tr key={r.id} onClick={() => setSelectedId(r.id)} className={selectedId === r.id ? 'selected-row' : ''}>
-                <td>{r.name}</td>
-                <td>{r.expertise ?? '-'}</td>
-                <td>{r.phone ?? '-'}</td>
-                <td>{r.project_count}</td>
-                <td>{r.total_progress.toFixed(2)}</td>
-                <td>{r.total_payment.toFixed(2)}</td>
-                <td>{r.total_advance.toFixed(2)}</td>
-                <td>{r.total_deduction.toFixed(2)}</td>
-                <td className={r.net_balance < 0 ? 'danger' : ''}>{r.net_balance.toFixed(2)}</td>
-                <td>{r.status}</td>
-              </tr>
-            ))}
+            {filtered.map((r) => <tr key={r.id} onClick={() => setSelectedId(r.id)} className={selectedId === r.id ? 'selected-row' : ''}><td>{r.name}</td><td>{r.expertise ?? '-'}</td><td>{r.phone ?? '-'}</td><td>{r.project_count}</td><td>{r.total_progress.toFixed(2)}</td><td>{r.total_payment.toFixed(2)}</td><td>{r.total_advance.toFixed(2)}</td><td>{r.total_deduction.toFixed(2)}</td><td className={r.net_balance < 0 ? 'danger' : ''}>{r.net_balance.toFixed(2)}</td><td>{r.status}</td></tr>)}
           </tbody>
           <tfoot>
             <tr>
@@ -88,9 +76,7 @@ export function SubcontractorsPage({ rows, onRefresh }: { rows: Row[]; onRefresh
 
       <section className="panel">
         <h3>Taşeron Detayı {selected ? `- ${selected.name}` : ''}</h3>
-        <div className="tab-row">
-          {tabs.map((t) => <button type="button" key={t} className={tab === t ? 'tab active' : 'tab'} onClick={() => setTab(t)}>{t}</button>)}
-        </div>
+        <div className="tab-row">{tabs.map((t) => <button type="button" key={t} className={tab === t ? 'tab active' : 'tab'} onClick={() => setTab(t)}>{t}</button>)}</div>
         {selected ? (
           <div>
             {tab === 'GENEL' && <p>Net bakiye: <strong>{selected.net_balance.toFixed(2)}</strong> | Ek borç/fark: {selected.extra_balance.toFixed(2)}</p>}

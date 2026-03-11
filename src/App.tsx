@@ -17,19 +17,28 @@ export function App() {
   const [subcontractorMgmt, setSubcontractorMgmt] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [companyBalances, setCompanyBalances] = useState<any[]>([]);
+  const [personnel, setPersonnel] = useState<any[]>([]);
   const [recent, setRecent] = useState<any[]>([]);
 
   const refresh = async () => {
-    const [d, p, s, sm, c, cb, r] = await Promise.all([
+    const [d, p, s, sm, c, cb, pe, r] = await Promise.all([
       window.dobiApi.dashboard(),
       window.dobiApi.listProjects(),
       window.dobiApi.listSubcontractors(),
       window.dobiApi.listSubcontractorManagement(),
       window.dobiApi.listCompanies(),
       window.dobiApi.listCompanyBalances(),
+      window.dobiApi.listPersonnel(),
       window.dobiApi.recentTransactions()
     ]);
-    setDashboard(d); setProjects(p); setSubcontractors(s); setSubcontractorMgmt(sm); setCompanies(c); setCompanyBalances(cb); setRecent(r);
+    setDashboard(d);
+    setProjects(p);
+    setSubcontractors(s);
+    setSubcontractorMgmt(sm);
+    setCompanies(c);
+    setCompanyBalances(cb);
+    setPersonnel(pe);
+    setRecent(r);
   };
 
   useEffect(() => {
@@ -41,8 +50,8 @@ export function App() {
     if (selected === 'Dashboard') return <DashboardPage dashboard={dashboard} recent={recent} />;
     if (selected === 'Firma / Cari Yönetimi') return <CompaniesPage rows={companyBalances} movements={recent} onRefresh={refresh} />;
     if (selected === 'Taşeron Yönetimi') return <SubcontractorsPage rows={subcontractorMgmt} onRefresh={refresh} />;
-    if (selected === 'Hakediş + Yevmiye') return <HakedisYevmiyePage companies={companies} subcontractors={subcontractors} projects={projects} onSaved={refresh} />;
-    if (selected === 'Avans / Ödeme / Kesinti') return <AvansOdemeKesintiPage companies={companies} subcontractors={subcontractors} projects={projects} onSaved={refresh} />;
+    if (selected === 'Hakediş + Yevmiye') return <HakedisYevmiyePage companies={companies} subcontractors={subcontractors} personnel={personnel} projects={projects} onSaved={refresh} />;
+    if (selected === 'Avans / Ödeme / Kesinti') return <AvansOdemeKesintiPage companies={companies} subcontractors={subcontractors} personnel={personnel} projects={projects} onSaved={refresh} />;
     if (selected === 'Projeler') return <ProjectsPage projects={projects} companies={companies} subcontractors={subcontractors} onRefresh={refresh} />;
     if (selected === 'Personel') return <ModuleEntriesPage moduleKey="personel" title="Personel Hareketleri" companies={companies} subcontractors={subcontractors} projects={projects} />;
     if (selected === 'Malzeme') return <ModuleEntriesPage moduleKey="malzeme" title="Malzeme Hareketleri" companies={companies} subcontractors={subcontractors} projects={projects} />;

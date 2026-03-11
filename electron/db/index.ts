@@ -59,6 +59,14 @@ function runMigrations(conn: Database.Database) {
       notes TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS project_subcontractors (
+      project_id INTEGER NOT NULL,
+      subcontractor_id INTEGER NOT NULL,
+      PRIMARY KEY(project_id, subcontractor_id),
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(subcontractor_id) REFERENCES subcontractors(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS personnel (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       full_name TEXT NOT NULL,
@@ -68,6 +76,19 @@ function runMigrations(conn: Database.Database) {
       monthly_salary REAL DEFAULT 0,
       daily_wage REAL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'AKTIF'
+    );
+
+    CREATE TABLE IF NOT EXISTS module_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      module_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      transaction_date TEXT NOT NULL,
+      related_company_id INTEGER,
+      related_subcontractor_id INTEGER,
+      related_project_id INTEGER,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS promissory_notes (
@@ -118,16 +139,11 @@ function runMigrations(conn: Database.Database) {
       COALESCE(SUM(CASE WHEN t.transaction_type = 'AVANS' THEN t.amount ELSE 0 END), 0) AS total_advance,
       COALESCE(SUM(CASE WHEN t.transaction_type = 'ODEME' THEN t.amount ELSE 0 END), 0) AS total_payment,
       COALESCE(SUM(CASE WHEN t.transaction_type = 'KESINTI' THEN t.amount ELSE 0 END), 0) AS total_deduction,
-      COALESCE(SUM(t.material_deduction_amount), 0) AS total_material_deduction,
-      COALESCE(SUM(t.equipment_deduction_amount), 0) AS total_equipment_deduction,
       (
-        COALESCE(SUM(CASE WHEN t.transaction_type = 'HAKEDIS' THEN t.amount ELSE 0 END), 0) +
-        COALESCE(SUM(CASE WHEN t.transaction_type = 'YEVMIYE' THEN t.amount ELSE 0 END), 0) -
-        COALESCE(SUM(CASE WHEN t.transaction_type = 'AVANS' THEN t.amount ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN t.transaction_type = 'HAKEDIS' THEN t.amount ELSE 0 END), 0) -
         COALESCE(SUM(CASE WHEN t.transaction_type = 'ODEME' THEN t.amount ELSE 0 END), 0) -
-        COALESCE(SUM(CASE WHEN t.transaction_type = 'KESINTI' THEN t.amount ELSE 0 END), 0) -
-        COALESCE(SUM(t.material_deduction_amount), 0) -
-        COALESCE(SUM(t.equipment_deduction_amount), 0)
+        COALESCE(SUM(CASE WHEN t.transaction_type = 'AVANS' THEN t.amount ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN t.transaction_type = 'KESINTI' THEN t.amount ELSE 0 END), 0)
       ) AS net_receivable
     FROM subcontractors s
     LEFT JOIN transactions t ON t.related_party_type = 'TASERON' AND t.related_party_id = s.id
